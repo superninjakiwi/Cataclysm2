@@ -27,7 +27,7 @@ item_group: 50 a = items_forest
 tile: a = w:30 dirt / w:5 grass / w:5 tree
 tile: # = wood wall
 tile: [ = window
-tile: . = w:9 dirt / w:1 grass
+tile: . = w:30 dirt / w:1 grass
 tile: B = bed
 tile: O = floor
 tile: C = crate
@@ -37,17 +37,18 @@ tile: F = fridge
 tile: % = toilet
 tile: { = display rack
 tile: + = closed door
+tile: o = oven
 map:
 aaaaaaaa..aaaaaaaaaaaaaaa
 aaaaaaaa..aaaaaaaaaaaaaaa
 aaaaaaaaa..aaaaaaaaaaaaaa
 a#[[##[##..##[[##[#####aa
 a#TTT#OC#++#TSTF#%O#O{#aa
-a[OOO#O##
-a#BBO#O%#
-a[OOO#OS#
-a#OOO#+##
-a#OOo+OOO
+a[OOO#O##OO#oO
+a#BBO#O%#TO#T
+a[OOO#OS#TO#T
+a#OOO#+##TO#T
+a#OOo+OOOOOO
 a#TTT#
 aaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaaaaaaaaaaaaaa
