@@ -41,7 +41,7 @@ public:
 
   void add_terrain(int chance, Terrain* terrain);
   void add_terrain(Terrain_chance terrain);
-  void load_data(std::istream &data, std::string name = "unknown",
+  bool load_data(std::istream &data, std::string name = "unknown",
                  bool allow_nothing = false);
 
   void prepare(); // If it's a lock, then define Terrain* choice.
@@ -141,6 +141,7 @@ struct Mapgen_spec
   void rotate(Direction dir);
   Terrain* pick_terrain(int x, int y);
 
+  std::string get_name();
   void debug_output();
 
   int uid;

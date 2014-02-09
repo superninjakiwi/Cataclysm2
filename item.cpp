@@ -5,6 +5,7 @@
 #include "cuss.h"
 #include "entity.h"
 #include "attack.h"
+#include "files.h"    // For CUSS_DIR
 #include <sstream>
 
 Item::Item(Item_type* T)
@@ -67,9 +68,17 @@ bool Item::can_reload()
 int Item::time_to_reload()
 {
   if (!can_reload() || !is_real()) {
-    return -1;
+    return 0;
   }
   return type->time_to_reload();
+}
+
+int Item::time_to_fire()
+{
+  if (!is_real()) {
+    return 0;
+  }
+  return type->time_to_fire();
 }
 
 int Item::get_uid()
@@ -372,8 +381,7 @@ Item_action Item::show_info()
   }
   Window w_info(0, 0, 80, 24);
   cuss::interface i_info;
-  if (!i_info.load_from_file("cuss/i_item_info.cuss")) {
-    debugmsg("Couldn't load cuss/i_item_info.cuss!");
+  if (!i_info.load_from_file(CUSS_DIR + "/i_item_info.cuss")) {
     return IACT_NULL;
   }
 

@@ -4,6 +4,8 @@
 #include "window.h"
 #include "entity.h" // For Stats
 #include "item.h"
+#include "globals.h" // For FIELDS
+#include "game.h"
 #include <sstream>
 
 bool load_verbs(std::istream &data, std::string &verb_second,
@@ -169,11 +171,90 @@ Damage_set Attack::roll_damage()
   return ret;
 }
 
+Field_pool::Field_pool()
+{
+  type = NULL;
+  duration = Dice(0, 0, 0);
+  tiles = Dice(0, 0, 1);
+}
+
+Field_pool::~Field_pool()
+{
+}
+
+bool Field_pool::exists()
+{
+  return type;
+}
+
+void Field_pool::drop(Tripoint pos, std::string creator)
+{
+  int num_tiles = tiles.roll();
+  if (num_tiles <= 0) {
+    return; // Don't drop anything!
+  }
+  num_tiles--; // The one at the exact point is the first
+  int dur = duration.roll();
+  Field tmp(type);
+  tmp.set_duration(dur);
+  if (!creator.empty()) {
+    tmp.creator = creator;
+  }
+  GAME.map->add_field(tmp, pos);
+
+  for (int i = 0; i < num_tiles; i++) {
+    Tripoint next_pos(pos.x + rng(-1, 1), pos.y + rng(-1, 1), pos.z);
+    dur = duration.roll();
+    tmp.set_duration(dur);
+    GAME.map->add_field(tmp, next_pos);
+  }
+}
+
+bool Field_pool::load_data(std::istream& data, std::string owner_name)
+{
+  std::string ident, junk;
+  while (ident != "done" && !data.eof()) {
+
+    if ( ! (data >> ident) ) {
+      return false;
+    }
+
+    ident = no_caps(ident);
+
+    if (!ident.empty() && ident[0] == '#') { // I'ts a comment
+      std::getline(data, junk);
+
+    } else if (ident == "field:") {
+      std::string field_name;
+      std::getline(data, field_name);
+      field_name = trim(field_name);
+      type = FIELDS.lookup_name(field_name);
+      if (!type) {
+        debugmsg("Unknown field '%s' in Field_pool (%s)", field_name.c_str(),
+                 owner_name.c_str());
+        return false;
+      }
+
+    } else if (ident == "duration:") {
+      duration.load_data(data, owner_name + " Field_pool duration");
+
+    } else if (ident == "tiles:") {
+      tiles.load_data(data, owner_name + " Field_pool tiles");
+
+    } else if (ident != "done") {
+      debugmsg("Unknown Field_pool property '%s' (%s)", ident.c_str(),
+               owner_name.c_str());
+      return false;
+    }
+  }
+  return true;
+}
+
 Ranged_attack::Ranged_attack()
 {
   verb_second = "shoot";
   verb_third = "shoots";
-  weight = 0;
+  weight = 10;
   speed = 100;
   charge_time = 0;
   range = 0;
@@ -249,6 +330,18 @@ bool Ranged_attack::load_data(std::istream &data, std::string owner_name)
         armor_divisor[damtype] = 1;
       }
 
+    } else if (ident == "wake_field:") {
+      if (!wake_field.load_data(data, owner_name + " " + verb_third)) {
+        debugmsg("Failed to load wake_field (%s)", owner_name.c_str());
+        return false;
+      }
+
+    } else if (ident == "target_field:") {
+      if (!target_field.load_data(data, owner_name + " " + verb_third)) {
+        debugmsg("Failed to load target_field (%s)", owner_name.c_str());
+        return false;
+      }
+
     } else if (ident != "done") {
       std::string damage_name = ident;
       size_t colon = ident.find(':');
@@ -286,24 +379,35 @@ Damage_set Ranged_attack::roll_damage()
 
 Body_part random_body_part_to_hit()
 {
-  int pick = rng(1, 13);
-  switch (pick) {
-    case  1:  return BODYPART_HEAD;
-    case  2:
-    case  3:  return BODYPART_LEFT_ARM;
-    case  4:
-    case  5:  return BODYPART_RIGHT_ARM;
-    case  6:
-    case  7:  return BODYPART_LEFT_LEG;
-    case  8:
-    case  9:  return BODYPART_RIGHT_LEG;
-    case 10:
-    case 11:
-    case 12:
-    case 13:  return BODYPART_TORSO;
+  int pick = rng(1, 38);
+  if (pick <= 4) {
+    return BODY_PART_HEAD;
   }
-
-  return BODYPART_TORSO;
+  if (pick <= 16) {
+    return BODY_PART_TORSO;
+  }
+  if (pick == 17) {
+    return BODY_PART_LEFT_HAND;
+  }
+  if (pick == 18) {
+    return BODY_PART_RIGHT_HAND;
+  }
+  if (pick <= 22) {
+    return BODY_PART_LEFT_ARM;
+  }
+  if (pick <= 26) {
+    return BODY_PART_RIGHT_ARM;
+  }
+  if (pick == 27) {
+    return BODY_PART_LEFT_FOOT;
+  }
+  if (pick == 28) {
+    return BODY_PART_RIGHT_FOOT;
+  }
+  if (pick <= 33) {
+    return BODY_PART_LEFT_LEG;
+  }
+  return BODY_PART_RIGHT_LEG;
 }
 
 bool load_verbs(std::istream &data, std::string &verb_second,

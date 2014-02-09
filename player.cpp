@@ -1,6 +1,7 @@
 #include "player.h"
 #include "cuss.h"
 #include "game.h"
+#include "files.h"  // For CUSS_DIR
 #include <sstream>
 
 void populate_item_lists(Player* p, int offset_size,
@@ -17,7 +18,7 @@ Player::Player()
   pos.y = 15;
   action_points = 100;
   name = "Whales";
-  for (int i = 0; i < BODYPART_MAX; i++) {
+  for (int i = 0; i < HP_PART_MAX; i++) {
     current_hp[i] = 100;
     max_hp[i] = 100;
   }
@@ -145,17 +146,15 @@ std::vector<Item> Player::inventory_ui(bool single, bool remove)
 {
   Window w_inv(0, 0, 80, 24);
   cuss::interface i_inv;
+  std::string inv_file = CUSS_DIR + "/i_inventory.cuss";
 // Sanity checks
-  if (!i_inv.load_from_file("cuss/i_inventory.cuss")) {
-    debugmsg("Couldn't open cuss/i_inventory.cuss!");
-    std::vector<Item> ret;
-    return ret;
+  if (!i_inv.load_from_file(inv_file)) {
+    return std::vector<Item>();
   }
   cuss::element *ele_list_items = i_inv.find_by_name("list_items");
   if (ele_list_items == NULL) {
-    debugmsg("No element 'list_items' in cuss/i_inventory.cuss");
-    std::vector<Item> ret;
-    return ret;
+    debugmsg("No element 'list_items' in %s", inv_file.c_str());
+    return std::vector<Item>();
   }
   int offset_size = ele_list_items->sizey;
 // Set static text fields, which are different depending on single/remove
@@ -454,13 +453,18 @@ void Player::take_damage(Damage_type type, int damage, std::string reason,
                          Body_part part)
 {
 // TODO: Armor absorbs damage
-  current_hp[part] -= damage;
+  current_hp[ convert_to_HP(part) ] -= damage;
 }
 
 std::string Player::hp_text(Body_part part)
 {
+  return hp_text( convert_to_HP(part) );
+}
+
+std::string Player::hp_text(HP_part part)
+{
 // Sanity check
-  if (part == BODYPART_MAX) {
+  if (part == HP_PART_MAX) {
     return "BP_MAX???";
   }
   std::stringstream ret;

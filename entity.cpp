@@ -75,6 +75,16 @@ void Entity_plan::generate_path_to_target(Entity_AI AI, Tripoint origin)
   }
 }
 
+void Entity_plan::update()
+{
+  if (attention > 0) {
+    attention--;
+  }
+  if (attention <= 0) {
+    target_entity = NULL;
+  }
+}
+
 bool Entity_plan::is_active()
 {
   if (attention <= 0) {
@@ -118,6 +128,7 @@ Entity::Entity()
   killed_by_player = false;
   hunger = 0;
   thirst = 0;
+  special_timer = 0;
 }
 
 Entity::~Entity()
@@ -208,6 +219,40 @@ bool Entity::pick_attack_victim()
 bool Entity::pick_flee_target()
 {
   return false;
+}
+
+std::vector<Ranged_attack> Entity::get_ranged_attacks()
+{
+  return std::vector<Ranged_attack>();
+}
+
+Ranged_attack Entity::pick_ranged_attack(Entity* target)
+{
+  std::vector<Ranged_attack> ra = get_ranged_attacks();
+  if (ra.empty()) {
+    return Ranged_attack();
+  }
+  int total_chance = 0;
+  std::vector<Ranged_attack> used;
+  for (int i = 0; i < ra.size(); i++) {
+    if (target && rl_dist(pos, target->pos) > ra[i].range) {
+      ra.erase(ra.begin() + i);
+      i--;
+    } else {
+      total_chance += ra[i].weight;
+    }
+  }
+  if (ra.empty()) { // No attacks in range!
+    return Ranged_attack();
+  }
+  int index = rng(1, total_chance);
+  for (int i = 0; i < ra.size(); i++) {
+    index -= ra[i].weight;
+    if (index <= 0) {
+      return ra[i];
+    }
+  }
+  return ra.back();
 }
 
 Entity_AI Entity::get_AI()
@@ -303,7 +348,9 @@ void Entity::smash(Map* map, Tripoint sm)
   if (!map) {
     return;
   }
-  map->smash(sm, base_attack().roll_damage());
+  Attack att = base_attack();
+  action_points -= att.speed;
+  map->smash(sm, att.roll_damage());
 }
 
 void Entity::smash(Map* map, int x, int y, int z)
@@ -638,7 +685,20 @@ Attack Entity::std_attack()
   return att;
 }
 
-  
+bool Entity::can_attack(Entity* target)
+{
+  if (!target) {
+    return false;
+  }
+  if (pos.z != target->pos.z) {
+    return false;
+  }
+  if (rl_dist(pos, target->pos) <= 1){
+    return true;
+  }
+  return false;
+}
+
 void Entity::attack(Entity* target)
 {
   if (!target) {
@@ -667,7 +727,7 @@ void Entity::attack(Entity* target)
   }
 
   Body_part bp_hit = (target->is_player() ? random_body_part_to_hit() :
-                                            BODYPART_NULL);
+                                            BODY_PART_NULL);
 
 // TODO: Should total_damage be reduced by damage absorbed by armor?
   Damage_set damage = att.roll_damage();
@@ -685,7 +745,7 @@ void Entity::attack(Entity* target)
       damage_ss << att.verb_third;
     }
     damage_ss << " ";
-    if (bp_hit == BODYPART_NULL) {
+    if (bp_hit == BODY_PART_NULL) {
       damage_ss << target->get_name_to_player();
     } else {
       damage_ss << target->get_possessive() << " " << body_part_name(bp_hit);
@@ -743,7 +803,73 @@ Ranged_attack Entity::fire_weapon()
     return Ranged_attack();
   }
   weapon.charges--;
+  action_points -= weapon.time_to_fire();
   return weapon.get_fired_attack();
+}
+
+bool Entity::can_fire_weapon()
+{
+  if (!weapon.is_real()) {
+    if (is_player()) {
+      GAME.add_msg("You are not wielding anything.");
+    }
+    return false;
+  } else if (weapon.get_item_class() != ITEM_CLASS_LAUNCHER) {
+    if (is_player()) {
+      GAME.add_msg("You cannot fire %s.", weapon.get_name_indefinite().c_str());
+    }
+    return false;
+  } else if (weapon.charges == 0 || !weapon.ammo) {
+    if (is_player()) {
+      GAME.add_msg("You need to reload %s.",
+                   weapon.get_name_definite().c_str());
+    }
+    return false;
+  }
+  return true;
+}
+
+bool Entity::can_attack_ranged(Entity* target)
+{
+  if (!target) {
+    return false;
+  }
+  std::vector<Ranged_attack> ra = get_ranged_attacks();
+  if (ra.empty()) {
+    return false;
+  }
+  int range = rl_dist(pos, target->pos);
+  for (int i = 0; i < ra.size(); i++) {
+    if (ra[i].range >= range) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void Entity::attack_ranged(Entity* target, Ranged_attack ra)
+{
+  if (!target) {
+    return;
+  }
+  if (ra.range == 0) {
+    return; // This means that it's not a real ranged attack
+  }
+// Set the special_timer.  This really only affects monsters - monsters can't
+// use ranged attacks if their special_timer is more than 0.
+  special_timer = ra.charge_time;
+  GAME.launch_projectile(this, ra, pos, target->pos);
+  action_points -= ra.speed;
+  if (GAME.player->can_see(GAME.map, pos)) {
+    std::string target_name;
+    if (GAME.player->can_see(GAME.map, target->pos)) {
+      target_name = target->get_name_to_player();
+    } else {
+      target_name = "something";
+    }
+    GAME.add_msg("%s %s at %s!", get_name_to_player().c_str(),
+                 ra.verb_third.c_str(), target_name.c_str());
+  }
 }
 
 bool Entity::can_sense(Map* map, int x, int y, int z)

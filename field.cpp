@@ -46,6 +46,10 @@ bool Field_fuel::load_data(std::istream& data, std::string owner_name)
       }
       item_flag = itf;
 
+    } else if (ident == "any_item") {
+      any_item = true;
+      std::getline(data, junk);
+
     } else if (ident == "fuel:") {
       data >> fuel;
       std::getline(data, junk);
@@ -127,27 +131,15 @@ bool Field_level::load_data(std::istream& data, std::string owner_name)
       std::getline(data, body_part_line);
       std::istringstream body_part_data(body_part_line);
       std::string body_part_name;
-// TODO: Standardize this somewhere, it's used in Attack too I think?
       while (body_part_data >> body_part_name) {
-        if (body_part_name == "arms") {
-          body_parts_hit.push_back(BODYPART_LEFT_ARM);
-          body_parts_hit.push_back(BODYPART_RIGHT_ARM);
-        } else if (body_part_name == "legs") {
-          body_parts_hit.push_back(BODYPART_LEFT_LEG);
-          body_parts_hit.push_back(BODYPART_RIGHT_LEG);
-        } else if (body_part_name == "all") {
-          body_parts_hit.clear();
-          for (int i = 1; i < BODYPART_MAX; i++) {
-            body_parts_hit.push_back( Body_part(i) );
-          }
-        } else {
-          Body_part bp = lookup_body_part( body_part_name );
-          if (bp == BODYPART_NULL) {
-            debugmsg("Unknown body part '%s' (%s:%s)", body_part_name.c_str(),
-                     owner_name.c_str(), name.c_str());
-            return false;
-          }
-          body_parts_hit.push_back(bp);
+        std::vector<Body_part> parts = get_body_part_list( body_part_name );
+        for (int i = 0; i < parts.size(); i++) {
+          body_parts_hit.push_back( parts[i] );
+        }
+        if (parts.empty()) {
+          debugmsg("Unknown body part '%s' (%s:%s)", body_part_name.c_str(),
+                   owner_name.c_str(), name.c_str());
+          return false;
         }
       }
 
@@ -281,7 +273,7 @@ bool Field_type::has_flag(Terrain_flag tf, int level)
 
 bool Field_type::has_flag(Field_flag ff, int level)
 {
-  if (terrain_flags[ff]) {
+  if (field_flags[ff]) {
     return true;
   }
   if (level >= 0 && level < levels.size() && get_level(level)->has_flag(ff)) {
@@ -415,6 +407,7 @@ Field::Field(Field_type* T, int L, std::string C)
   level = L;
   creator = C;
   duration = 0;
+  dead = false;
   if (type) {
     Field_level* lev = type->get_level(level);
     if (lev) {
@@ -454,11 +447,7 @@ bool Field::has_flag(Field_flag flag)
   if (!type) {
     return false;
   }
-  Field_level* lev = type->get_level(level);
-  if (!lev) {
-    return false;
-  }
-  return lev->has_flag(flag);
+  return type->has_flag(flag, level);
 }
 
 bool Field::has_flag(Terrain_flag flag)
@@ -466,11 +455,7 @@ bool Field::has_flag(Terrain_flag flag)
   if (!type) {
     return false;
   }
-  Field_level* lev = type->get_level(level);
-  if (!lev) {
-    return false;
-  }
-  return lev->has_flag(flag);
+  return type->has_flag(flag, level);
 }
 
 std::string Field::get_name()
@@ -526,6 +511,12 @@ Field& Field::operator+=(const Field& rhs)
   return (*this);
 }
 
+void Field::set_duration(int dur)
+{
+  duration = dur;
+  adjust_level();
+}
+
 void Field::hit_entity(Entity* entity)
 {
   if (!entity || !type) {
@@ -576,16 +567,23 @@ void Field::process(Map* map, Tripoint pos)
     duration -= level_data->duration_lost_without_fuel;
   }
 
+// Lose duration if we rise and there's empty terrain above
+// TODO: Don't hard-code duration lost?
+// TODO: Actual vertical spreading?
+  if (has_flag(FIELD_FLAG_RISE) &&
+      map->has_flag(TF_OPEN_SPACE, pos.x, pos.y, pos.z + 1)) {
+    duration -= rng(0, 30);
+  }
 // Spread if appropriate
-// TODO: Vertical spreading?
 
 // Calculate which points are open for spreading
-  if ((has_flag(FIELD_FLAG_DIFFUSE) || duration > type->spread_cost) &&
+  if ((has_flag(FIELD_FLAG_DIFFUSE) ||
+       get_full_duration() > type->spread_cost) &&
       rng(1, 100) <= type->spread_chance) {
     bool solid = has_flag(FIELD_FLAG_SOLID);
     std::vector<Tripoint> spread_points;
     for (int x = pos.x - 1; x <= pos.x + 1; x++) {
-      for (int y = pos.y - 1; x <= pos.y + 1; y++) {
+      for (int y = pos.y - 1; y <= pos.y + 1; y++) {
         int z = pos.z;
         if ((!map->contains_field(x, y, z) ||
             map->field_uid_at(x, y, z) == get_type_uid()) &&
@@ -643,17 +641,18 @@ void Field::adjust_level()
     return;
   }
 
-  debugmsg("Duration %d; level => %d", duration, level);
   while (duration < 0 && level >= 0) {
     level--;
-    duration += type->get_level(level)->duration;
-    debugmsg("Duration %d; level => %d", duration, level);
+    if (level < 0) {
+      dead = true;
+    } else {
+      duration += type->get_level(level)->duration;
+    }
   }
 
   while (duration >= type->duration_needed_to_reach_level(level + 1)) {
     duration -= type->get_level(level)->duration;
     level++;
-    debugmsg("Duration %d; level => %d", duration, level);
   }
 
   if (duration < 0) {
@@ -667,7 +666,7 @@ bool Field::consume_fuel(Map* map, Tripoint pos)
   std::vector<Tripoint> open_points_all;
   std::vector<Tripoint> open_points_passable; // i.e. not walls
   for (int x = pos.x - 1; x <= pos.x + 1; x++) {
-    for (int y = pos.y - 1; x <= pos.y + 1; y++) {
+    for (int y = pos.y - 1; y <= pos.y + 1; y++) {
       int z = pos.z;
       if (!map->contains_field(x, y, z)) {
         open_points_all.push_back( Tripoint(x, y, z) );
@@ -688,7 +687,6 @@ bool Field::consume_fuel(Map* map, Tripoint pos)
        it != type->fuel.end();
        it++) {
     Field_fuel fuel = (*it);
-    int damage = fuel.damage.roll();
 // Create a new field that we're going to output
     Field_type* smoke_type = FIELDS.lookup_name(fuel.output_field);
     if (!fuel.output_field.empty() && !smoke_type) {
@@ -700,8 +698,11 @@ bool Field::consume_fuel(Map* map, Tripoint pos)
     tmp_field.duration = 0;
 // Check for terrain flag
     if (tile_here->has_flag(fuel.terrain_flag)) {
-      found_fuel = true;
       int fuel_gained = fuel.fuel;
+      int damage = fuel.damage.roll();
+      if (fuel_gained >= 0) {
+        found_fuel = true;
+      }
       if (tile_here->hp < damage) {
         double fuel_percent = tile_here->hp / damage;
         fuel_gained = int( double(fuel.fuel) * fuel_percent );
@@ -715,8 +716,11 @@ bool Field::consume_fuel(Map* map, Tripoint pos)
     for (int n = 0; n < tile_here->items.size(); n++) {
       Item* it = &(tile_here->items[n]);
       if (it->has_flag(fuel.item_flag)) {
-        found_fuel = true;
         int fuel_gained = fuel.fuel;
+        int damage = fuel.damage.roll();
+        if (fuel_gained >= 0) {
+          fuel_gained = true;
+        }
         if (it->hp < damage) {
           double fuel_percent = it->hp / damage;
           fuel_gained = int( double(fuel.fuel) * fuel_percent );
@@ -737,7 +741,7 @@ bool Field::consume_fuel(Map* map, Tripoint pos)
     }
   }
 
-// At this point we've consumed fuel; so output whatever smoke we have
+// At this point we've consumed fuel; so output whatever "smoke" we have
   for (int i = 0; i < output.size(); i++) {
     std::vector<Tripoint>* placement;
 // Decide whether to place on all valid points, or passable ones
@@ -746,10 +750,14 @@ bool Field::consume_fuel(Map* map, Tripoint pos)
     } else {
       placement = &(open_points_passable);
     }
-    int index = rng(0, placement->size() - 1);
-    Tripoint p = (*placement)[index];
-    placement->erase( placement->begin() + index );
-    map->add_field(output[i], p);
+    if (placement->empty()) {
+      i = output.size();
+    } else {
+      int index = rng(0, placement->size() - 1);
+      Tripoint p = (*placement)[index];
+      placement->erase( placement->begin() + index );
+      map->add_field(output[i], p);
+    }
   }
 
   return found_fuel;
@@ -775,6 +783,7 @@ std::string field_flag_name(Field_flag flag)
     case FIELD_FLAG_NULL:     return "NULL";
     case FIELD_FLAG_SOLID:    return "solid";
     case FIELD_FLAG_DIFFUSE:  return "diffuse";
+    case FIELD_FLAG_RISE:     return "rise";
     case FIELD_FLAG_MAX:      return "BUG - FIELD_FLAG_MAX";
     default:                  return "BUG - Unnamed Field_flag";
   }

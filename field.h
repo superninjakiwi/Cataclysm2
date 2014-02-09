@@ -27,6 +27,7 @@ enum Field_flag
   FIELD_FLAG_NULL = 0,
   FIELD_FLAG_SOLID,     // "solid" - can be placed on solid terrain
   FIELD_FLAG_DIFFUSE,   // "diffuse" - spread even if the cost will destroy us
+  FIELD_FLAG_RISE,      // "rise" - goes up, loses duration if empty ter above
   FIELD_FLAG_MAX
 };
 
@@ -42,6 +43,7 @@ struct Field_fuel
 
   Terrain_flag  terrain_flag;
   Item_flag     item_flag;
+  bool any_item;  // If true, then we consume any item!
   int fuel;
 // Damage done to the terrain each turn
 // If 0, then the terrain is not damaged or destroyed at all!
@@ -170,6 +172,7 @@ public:
 
 // Active functions
   Field& operator+=(const Field& rhs);
+  void set_duration(int dur);
   void hit_entity(Entity* entity);
   void process(Map* map, Tripoint pos);
   void gain_level();

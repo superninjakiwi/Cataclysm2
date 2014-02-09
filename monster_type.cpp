@@ -16,6 +16,7 @@ Monster_type::Monster_type()
   chance = 100;
   hp_set = false;
   attacks_copied_from_genus = false;
+  ranged_attacks_copied_from_genus = false;
   senses_copied_from_genus = false;
   
   for (int i = 0; i < SENSE_MAX; i++) {
@@ -35,12 +36,20 @@ void Monster_type::set_genus(Monster_genus *mg)
   }
 
   genus = mg;
-  genus->add_member(this);
 // Copy any unset values from the genus
   if (attacks.empty()) {
-    attacks_copied_from_genus = true;
     attacks = mg->default_values.attacks;
+    if (!attacks.empty()) {
+      attacks_copied_from_genus = true;
+    }
     total_attack_weight = mg->default_values.total_attack_weight;
+  }
+  if (ranged_attacks.empty()) {
+    ranged_attacks = mg->default_values.ranged_attacks;
+    if (!ranged_attacks.empty()) {
+      ranged_attacks_copied_from_genus = true;
+    }
+    total_ranged_attack_weight = mg->default_values.total_ranged_attack_weight;
   }
   if (!hp_set) {
     hp_dice = mg->default_values.hp_dice;
@@ -133,7 +142,6 @@ bool Monster_type::load_data(std::istream &data)
     } else if (ident == "hp:") {
       hp_dice.load_data(data, name);
       hp_set = true;
-      std::getline(data, junk);
 
     } else if (ident == "speed:") {
       data >> speed;
@@ -170,9 +178,28 @@ bool Monster_type::load_data(std::istream &data)
       }
       std::getline(data, junk);
       Attack tmpattack;
-      tmpattack.load_data(data, name);
+      if (!tmpattack.load_data(data, name)) {
+        debugmsg("Attack failed to load (%s)", name.c_str());
+        return false;
+      }
       attacks.push_back(tmpattack);
       total_attack_weight += tmpattack.weight;
+
+    } else if (ident == "ranged_attack:") {
+// Remove all ranged attacks, if they were copied from our genus
+// (Because we want to completely override the defaults)
+      if (ranged_attacks_copied_from_genus) {
+        ranged_attacks_copied_from_genus = false;
+        ranged_attacks.clear();
+      }
+      std::getline(data, junk);
+      Ranged_attack tmpattack;
+      if (!tmpattack.load_data(data, name)) {
+        debugmsg("Ranged attack failed to load (%s)", name.c_str());
+        return false;
+      }
+      ranged_attacks.push_back(tmpattack);
+      total_ranged_attack_weight += tmpattack.weight;
 
     } else if (ident == "ai:") {
       std::getline(data, junk);
@@ -183,6 +210,10 @@ bool Monster_type::load_data(std::istream &data)
                ident.c_str(), name.c_str());
       return false;
     }
+  }
+// Don't add ourselfs to the genus until *after* we've loaded our values!
+  if (genus) {
+    genus->add_member(this);
   }
   return true;
 }
@@ -269,6 +300,7 @@ bool Monster_genus::load_data(std::istream &data)
 
     } else if (ident == "default:") {
       if (!default_values.load_data(data)) {
+        debugmsg("Genus %s failed to load default values", name.c_str());
         return false;
       }
 

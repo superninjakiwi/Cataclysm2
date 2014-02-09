@@ -3,6 +3,7 @@
 
 #include "enum.h"
 #include "dice.h"
+#include "geometry.h" // For Tripoint
 #include <string>
 #include <vector>
 #include <istream>
@@ -11,6 +12,7 @@ Body_part random_body_part_to_hit();
 
 struct Stats;
 class Item;
+class Field_type;
 
 struct Damage_set
 {
@@ -67,6 +69,22 @@ struct Attack
   Damage_set roll_damage();
 };
 
+struct Field_pool
+{
+  Field_pool();
+  ~Field_pool();
+
+  Field_type* type;
+  Dice duration;
+  Dice tiles;
+
+  bool exists();
+
+  void drop(Tripoint pos, std::string creator = "");
+
+  bool load_data(std::istream& data, std::string owner_name = "Unknown");
+};
+
 struct Ranged_attack
 {
   Ranged_attack();
@@ -84,10 +102,13 @@ struct Ranged_attack
 
 /* TODO: Add the following as they're implemented:
  *      Status_effect this causes (Blinding, stunning, etc)
- *      Field this leaves in its wake (smoke, slime, etc)
- *      Field pool this plants at its destination (acid, fire)
  *      Other???
  */
+
+// Field_pool that we leave in our wake
+  Field_pool wake_field;
+// Field_pool that is created at the tile hit
+  Field_pool target_field;
 
   bool load_data(std::istream &data, std::string owner_name = "unknown");
 

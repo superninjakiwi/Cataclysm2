@@ -60,6 +60,36 @@ name: zombie brute
 # TODO: Once we have special melee effects, add "body slam" which knocks back
 done
 
+name: spitter zombie
+  name_plural: spitter zombies
+  genus: zombies
+  glyph: Z yellow black
+  chance: 7
+# Use default HP/speed
+  AI:
+    awareness: 1
+    attention: 15
+    goals:
+      attack_enemies
+      attack_neutrals
+    done
+  done
+# Use default melee attacks
+  ranged_attack:
+    verb: spit / spits
+    speed: 150
+    charge: 10
+    range: 10
+    variance: 20d10
+    target_field:
+      field: acid
+      duration: 4d6 + 10
+# 2d4 - 1 = 1 to 11, most likely 6
+      tiles: 2d6 - 1
+    done
+  done
+done
+
 name: mutant rabbit
   name_plural: mutant rabbits
   genus: mutant rabbits
@@ -106,6 +136,7 @@ name: demented dog
   glyph: d ltgray black
 	hp: 3d5 + 20
 	speed: 160
+  chance: 10
 	senses: sight smell hearing
 	attack:
 	  verb: bite / bites
@@ -140,6 +171,7 @@ done
 Name: wolf
   name_plural: wolves
   genus: canis
+  chance: 4
   glyph: W gray black
 	hp: 3d5 + 30
 	speed: 160
@@ -173,6 +205,7 @@ Name: zombie dog
   name_plural: zombie dogs
   genus: zombies
   glyph: d ltgreen black
+  chance: 1
 	hp: 3d5 + 25
 	speed: 130
 	senses: sight smell hearing

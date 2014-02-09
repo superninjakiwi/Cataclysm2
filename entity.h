@@ -33,6 +33,8 @@ struct Entity_plan
 
   void generate_path_to_target(Entity_AI AI, Tripoint origin);
 
+  void update();  // Decrement attention, reset target_entity if <= 0
+
   bool is_active();
 
   Tripoint next_step();
@@ -124,15 +126,22 @@ public:
 // Combat functions
   virtual Attack base_attack();
   virtual Attack std_attack(); // With weapon if it exists
+  virtual bool can_attack(Entity* target);
   virtual void attack(Entity* target);
   virtual int  hit_roll(int bonus);
   virtual int  dodge_roll();
   virtual void take_damage(Damage_type type, int damage, std::string reason,
-                           Body_part part = BODYPART_NULL);
+                           Body_part part = BODY_PART_NULL);
   virtual void take_damage(Damage_set damage, std::string reason,
-                           Body_part part = BODYPART_NULL);
+                           Body_part part = BODY_PART_NULL);
+
   virtual Ranged_attack throw_item(Item it);
   virtual Ranged_attack fire_weapon();
+  virtual std::vector<Ranged_attack> get_ranged_attacks();
+  virtual Ranged_attack pick_ranged_attack(Entity* target);
+  virtual bool can_fire_weapon();
+  virtual bool can_attack_ranged(Entity* target);
+  virtual void attack_ranged(Entity* target, Ranged_attack ra);
 
   virtual bool can_sense(Map* map, int x, int y, int z = 999);
   virtual bool can_sense(Map* map, Tripoint target);
@@ -152,6 +161,7 @@ public:
 
   Stats stats;
   int hunger, thirst;
+  int special_timer;
 
   Item weapon;
   std::vector<Item> inventory;

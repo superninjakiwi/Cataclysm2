@@ -4,6 +4,7 @@
 #include "map.h"
 #include "rng.h"
 #include "pathfind.h"
+#include "files.h"      // For CUSS_DIR
 #include <stdarg.h>
 #include <math.h>
 #include <sstream>
@@ -38,8 +39,7 @@ Game::~Game()
   
 bool Game::setup()
 {
-  if (!i_hud.load_from_file("cuss/i_hud.cuss")) {
-    debugmsg("Can't load cuss/i_hud.cuss!");
+  if (!i_hud.load_from_file(CUSS_DIR + "/i_hud.cuss")) {
     return false;
   }
   int xdim, ydim;
@@ -83,37 +83,57 @@ bool Game::main_loop()
   if (game_over) {
     return false;
   }
+/* TODO:  It's be nice to move all of this to Player::take_turn().  Then we
+ *        won't have to special case it - it'd just be another entity taking
+ *        their turn!
+ */
+// Give the player their action points
   player->gain_action_points();
   while (player->action_points > 0) {
+// Handle the player's activity (e.g. reloading, crafting, etc)
     handle_player_activity();
+// Update the map in case we need to right now
     shift_if_needed();
+// Update the HUD with our HP and all that
     update_hud();
+// Draw the map
     map->draw(w_map, &entities, player->pos);
     w_map->refresh();
 
+// The player doesn't get to give input if they have an active activity.
     if (!player->activity.is_active()) {
       long ch = input();
+// Quick and dirty ad-hoc debug key.
+// TODO: Set up a debug menu.
       if (ch == '!') {
-/*
         Monster* mon = new Monster;
-        mon->set_type("zombie");
+        mon->set_type("spitter zombie");
         mon->pos.x = player->pos.x - 3;
         mon->pos.y = player->pos.y - 3;
         entities.add_entity(mon);
-*/
+/*
         map->add_field( FIELDS.lookup_name("fire"), player->pos.x - 3, player->pos.y - 3, player->pos.z, "magic" );
+*/
+      } else if (ch == '?') {
+        debugmsg( map->get_center_submap()->get_spec_name().c_str() );
       }
+// Fetch the action bound to whatever key we pressed...
       Interface_action act = KEYBINDINGS.bound_to_key(ch);
+// ... and do that action.
       do_action(act);
     }
   }
+// Map processes fields after the player
   map->process_fields();
+// Shift the map - it's likely that the player moved or something
   shift_if_needed();
+// Now all other entities get their turn
   move_entities();
+// Maybe a monster killed us
   if (game_over) {
-    return false;
+    return false; // This terminates the game
   }
-  return true;
+  return true;    // This keeps the game going
 }
 
 void Game::do_action(Interface_action act)
@@ -129,10 +149,11 @@ void Game::do_action(Interface_action act)
     case IACTION_MOVE_SE: player_move( 1,  1);  break;
     case IACTION_PAUSE:   player->pause();      break;
 
+// TODO: Allow player_move() to handle vertical movement?
     case IACTION_MOVE_UP:
       if (!map->has_flag(TF_STAIRS_UP, player->pos)) {
         add_msg("You cannot go up here.");
-        player_move_vertical(1);
+        player_move_vertical(1);  // Snuck this in for debugging purposes
       } else {
         player_move_vertical(1);
       }
@@ -141,14 +162,13 @@ void Game::do_action(Interface_action act)
     case IACTION_MOVE_DOWN:
       if (!map->has_flag(TF_STAIRS_DOWN, player->pos)) {
         add_msg("You cannot go down here.");
-        player_move_vertical(-1);
+        player_move_vertical(-1); // Snuck this in for debugging purposes
       } else {
         player_move_vertical(-1);
       }
       break;
 
     case IACTION_PICK_UP:
-// TODO: Interface for picking up >1 item
       if (map->item_count(player->pos) == 0) {
         add_msg("No items here.");
       } else if (map->item_count(player->pos) == 1) {
@@ -163,6 +183,7 @@ void Game::do_action(Interface_action act)
       break;
 
     case IACTION_OPEN: {
+// TODO: Add a message that prompts for direction input
       Point dir = input_direction(input());
       if (dir.x == -2) { // Error
         add_msg("Invalid direction.");
@@ -179,6 +200,7 @@ void Game::do_action(Interface_action act)
     } break;
 
     case IACTION_CLOSE: {
+// TODO: Add a message that prompts for direction input
       Point dir = input_direction(input());
       if (dir.x == -2) { // Error
         add_msg("Invalid direction.");
@@ -195,6 +217,7 @@ void Game::do_action(Interface_action act)
     } break;
 
     case IACTION_SMASH: {
+// TODO: Add a message that prompts for direction input
       Point dir = input_direction(input());
       if (dir.x == -2) { // Error
         add_msg("Invalid direction.");
@@ -270,27 +293,19 @@ void Game::do_action(Interface_action act)
         } else {
           player->remove_item_uid(it.get_uid(), 1);
           Ranged_attack att = player->throw_item(it);
-          launch_projectile(it, att, player->pos, target);
+          launch_projectile(player, it, att, player->pos, target);
         }
       }
     } break;
 
     case IACTION_FIRE:
-      if (!player->weapon.is_real()) {
-        add_msg("You are not wielding anything.");
-      } else if (player->weapon.get_item_class() != ITEM_CLASS_LAUNCHER) {
-        add_msg("You cannot fire %s.",
-                player->weapon.get_name_indefinite().c_str());
-      } else if (player->weapon.charges == 0 || !player->weapon.ammo) {
-        add_msg("You need to reload %s.",
-                player->weapon.get_name_definite().c_str());
-      } else {
+      if (player->can_fire_weapon()) {
         Point target = target_selector();
         if (target.x == -1) { // We canceled
           add_msg("Never mind.");
         } else {
           Ranged_attack att = player->fire_weapon();
-          launch_projectile(Item(), att, player->pos, target);
+          launch_projectile(player, att, player->pos, target);
         }
       }
       break;
@@ -463,11 +478,45 @@ void Game::make_sound(std::string desc, int x, int y)
   }
 }
 
-void Game::launch_projectile(Item it, Ranged_attack attack,
+void Game::launch_projectile(Ranged_attack attack, Point origin, Point target)
+{
+  launch_projectile(NULL, attack, origin, target);
+}
+
+void Game::launch_projectile(Item it, Ranged_attack attack, Point origin,
+                             Point target)
+{
+  launch_projectile(NULL, it, attack, origin, target);
+}
+
+void Game::launch_projectile(Entity* shooter, Ranged_attack attack,
                              Point origin, Point target)
 {
+  launch_projectile(shooter, Item(), attack, origin, target);
+}
+
+// TODO: Make this 3D
+//       Also, move it to projectile.cpp?
+void Game::launch_projectile(Entity* shooter, Item it, Ranged_attack attack,
+                             Point origin, Point target)
+{
+  std::string shooter_name, verb = "shoot";
+  if (shooter) {
+    shooter_name = shooter->get_name_to_player();
+    verb = shooter->conjugate(verb);
+  } else {
+/* If there's no shooter, that implies that natural forces launched the
+ * projectile, e.g. rubble from an explosion.  In that case, we want our hit
+ * message to be "A piece of rubble hits you!"
+ */
+    if (it.is_real()) {
+      shooter_name = it.get_name_indefinite();
+    }
+    verb = "hits";
+  }
   int range = rl_dist(origin, target);
   int angle_missed_by = attack.roll_variance();
+  //debugmsg(attack.variance.str().c_str());
 // Use 1800 since attack.variance is measured in 10ths of a degree
   double distance_missed_by = range * tan(angle_missed_by * PI / 1800);
   int tiles_off = int(distance_missed_by);
@@ -477,42 +526,70 @@ void Game::launch_projectile(Item it, Ranged_attack attack,
   }
 // fine_distance is used later to see if we hit the target or "barely missed"
   int fine_distance = 100 * (distance_missed_by - tiles_off);
-  debugmsg("angle %d, missed %f, tiles %d, fine %d", angle_missed_by, distance_missed_by, tiles_off, fine_distance);
+  //debugmsg("angle %d, missed %f, tiles %d, fine %d", angle_missed_by, distance_missed_by, tiles_off, fine_distance);
 
   std::vector<Point> path = map->line_of_sight(origin, target);
   if (path.empty()) { // Lost line of sight at some point
     path = line_to(origin, target);
   }
 
-  for (int i = 0; i < path.size(); i++) {
+// We track i outside of the function, because we need it to know where the
+// projectile stopped.
+  int i = 0;
+  bool stopped = false;
+  while (!stopped && i < path.size()) {
     if (map->move_cost(path[i].x, path[i].y) == 0) {
 // It's a solid tile, so let's try to smash through it!
       map->smash(path[i].x, path[i].y, attack.roll_damage(), false);
       if (map->move_cost(path[i].x, path[i].y) == 0) {
-        return; // We didn't make it!
+        stopped = true; // Couldn't get through the terrain!
+        i--; // Stop at the terrain before the solid one
       }
     } else {
+// Drop a field in our wake?
+      if (attack.wake_field.exists()) {
+// TODO: Replace this 0 with the real Z-level
+        attack.wake_field.drop(Tripoint(path[i].x, path[i].y, 0), shooter_name);
+      }
+// Did we hit an entity?
       Entity* entity_hit = entities.entity_at(path[i].x, path[i].y);
       if (entity_hit) {
         bool hit;
-// TODO: Incorporate the size of the monster
         if (i == path.size() - 1) {
           hit = rng(0, 100) >= fine_distance;
         } else {
-          hit = one_in(3);
+          hit = one_in(3);// TODO: Incorporate the size of the monster
         }
+
         if (hit) {
-          add_msg("You shoot %s!", entity_hit->get_name_to_player().c_str());
+          add_msg("%s %s %s!", shooter_name.c_str(), verb.c_str(),
+                  entity_hit->get_name_to_player().c_str());
           Damage_set dam = attack.roll_damage();
           entity_hit->take_damage(DAMAGE_PIERCE, dam.get_damage(DAMAGE_PIERCE),
                                   "you");
-          return;
-        } else if (i == path.size() - 1) {
+          stopped = true;
+        } else if (i == path.size() - 1 && shooter == player) {
           add_msg("You barely miss %s.",
                   entity_hit->get_name_to_player().c_str());
         }
-      }
-    }
+      } // if (entity hit)
+    } // Didn't hit solid terrain
+    i++;
+  } // while (!stopped && i < path.size())
+
+  Tripoint end_point;
+  if (i == path.size()) {
+    end_point = Tripoint(path.back().x, path.back().y, 0);
+  } else {
+    end_point = Tripoint(path[i].x, path[i].y, 0);
+  }
+// Drop the projectile we threw, if it's "real"
+  if (it.is_real()) {
+    map->add_item(it, end_point);
+  }
+// Create the target_field from our attack, if it's "real"
+  if (attack.target_field.exists()) {
+    attack.target_field.drop(end_point, shooter_name);
   }
 }
 
@@ -589,12 +666,12 @@ void Game::update_hud()
   } else {
     i_hud.set_data("text_weapon", "None");
   }
-  i_hud.set_data("hp_head",  player->hp_text(BODYPART_HEAD     ) );
-  i_hud.set_data("hp_torso", player->hp_text(BODYPART_TORSO    ) );
-  i_hud.set_data("hp_l_arm", player->hp_text(BODYPART_LEFT_ARM ) );
-  i_hud.set_data("hp_r_arm", player->hp_text(BODYPART_RIGHT_ARM) );
-  i_hud.set_data("hp_l_leg", player->hp_text(BODYPART_LEFT_LEG ) );
-  i_hud.set_data("hp_r_leg", player->hp_text(BODYPART_RIGHT_LEG) );
+  i_hud.set_data("hp_head",  player->hp_text(HP_PART_HEAD     ) );
+  i_hud.set_data("hp_torso", player->hp_text(HP_PART_TORSO    ) );
+  i_hud.set_data("hp_l_arm", player->hp_text(HP_PART_LEFT_ARM ) );
+  i_hud.set_data("hp_r_arm", player->hp_text(HP_PART_RIGHT_ARM) );
+  i_hud.set_data("hp_l_leg", player->hp_text(HP_PART_LEFT_LEG ) );
+  i_hud.set_data("hp_r_leg", player->hp_text(HP_PART_RIGHT_LEG) );
   
   i_hud.draw(w_hud);
   w_hud->refresh();
@@ -645,8 +722,7 @@ void Game::pickup_items(int posx, int posy)
   }
 
   cuss::interface i_pickup;
-  if (!i_pickup.load_from_file("cuss/i_pickup.cuss")) {
-    debugmsg("Couldn't open cuss/i_pickup.cuss");
+  if (!i_pickup.load_from_file(CUSS_DIR + "/i_pickup.cuss")) {
     return;
   }
 

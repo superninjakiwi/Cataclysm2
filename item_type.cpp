@@ -15,7 +15,7 @@ Item_type::Item_type()
   }
   to_hit = 0;
   attack_speed = 0;
-  thrown_variance = Dice(5, 20, 0);
+  thrown_variance = Dice(8, 20, 0);
   thrown_dmg_percent = 50;
   thrown_speed = 0;
   for (int i = 0; i < ITEM_FLAG_MAX; i++) {
@@ -50,6 +50,7 @@ Item_type_launcher::Item_type_launcher()
   durability = 100;
   capacity = 15;
   reload_ap = 300;
+  fire_ap = 100;
 }
 void Item_type::assign_uid(int id)
 {
@@ -216,20 +217,14 @@ bool Item_type_clothing::handle_data(std::string ident, std::istream &data)
     std::istringstream cover_data(line);
     std::string body_part_name;
     while (cover_data >> body_part_name) {
-      if (body_part_name == "arms") {
-        covers[BODYPART_LEFT_ARM]  = true;
-        covers[BODYPART_RIGHT_ARM] = true;
-      } else if (body_part_name == "legs") {
-        covers[BODYPART_LEFT_LEG]  = true;
-        covers[BODYPART_RIGHT_LEG] = true;
-      } else {
-        Body_part bp = lookup_body_part( body_part_name );
-        if (bp == BODYPART_NULL) {
-          debugmsg("Unknown body part '%s' (%s)", body_part_name.c_str(),
-                   name.c_str());
-          return false;
-        }
-        covers[bp] = true;
+      std::vector<Body_part> parts = get_body_part_list( body_part_name );
+      for (int i = 0; i < parts.size(); i++) {
+        covers[ parts[i] ] = true;
+      }
+      if (parts.empty()) {
+        debugmsg("Unknown body part '%s' (%s)", body_part_name.c_str(),
+                 name.c_str());
+        return false;
       }
     }
 
@@ -252,6 +247,8 @@ bool Item_type_ammo::handle_data(std::string ident, std::istream &data)
   } else if (ident == "armor_pierce:" || ident == "pierce:") {
     data >> armor_pierce;
     if (armor_pierce <= 0) {
+      debugmsg("Armor pierce of %d found in %s.  Changed to 1.", armor_pierce,
+               name.c_str());
       armor_pierce = 1;
     }
     std::getline(data, junk);
