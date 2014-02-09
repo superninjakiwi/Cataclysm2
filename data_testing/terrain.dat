@@ -364,3 +364,13 @@ name: fridge
   movecost: 0
   flags: opaque
 done
+
+name: crate
+  glyph: X black brown
+  movecost: 0
+done
+
+name: desk
+  glyph: # pink black
+  movecost: 180
+done
